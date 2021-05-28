@@ -26,14 +26,10 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#include <sys/prex.h>
+#define _GNU_SOURCE
 
 #include <ctype.h>
 #include <string.h>
-#include <unistd.h>
-#include <errno.h>
-#include <stdlib.h>
 
 #include "fatfs.h"
 
@@ -155,7 +151,7 @@ fat_valid_name(char *name)
  * mode -> attribute
  */
 void
-fat_mode_to_attr(mode_t mode, u_char *attr)
+fat_mode_to_attr(mode_t mode, unsigned char *attr)
 {
 
 	*attr = 0;
@@ -171,7 +167,7 @@ fat_mode_to_attr(mode_t mode, u_char *attr)
  * attribute -> mode
  */
 void
-fat_attr_to_mode(u_char attr, mode_t *mode)
+fat_attr_to_mode(unsigned char attr, mode_t *mode)
 {
 
 	if (attr & FA_RDONLY)

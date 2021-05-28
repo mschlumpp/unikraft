@@ -27,14 +27,11 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/prex.h>
-#include <sys/buf.h>
+#include <uk/blkdev.h>
+#include <vfscore/mount.h>
 
-#include <ctype.h>
 #include <string.h>
-#include <unistd.h>
 #include <errno.h>
-#include <stdlib.h>
 
 #include "fatfs.h"
 
@@ -42,29 +39,20 @@
  * Read directory entry to buffer, with cache.
  */
 static int
-fat_read_dirent(struct fatfsmount *fmp, u_long sec)
+fat_read_dirent(struct fatfsmount *fmp, __u32 sec)
 {
-	struct buf *bp;
-	int error;
-
-	if ((error = bread(fmp->dev, sec, &bp)) != 0)
-		return error;
-	memcpy(fmp->dir_buf, bp->b_data, SEC_SIZE);
-	brelse(bp);
-	return 0;
+	/* PERF: prex used bread function which reads data from cache */
+	return uk_blkdev_sync_io(fmp->dev, 0, UK_BLKREQ_READ, sec, 1, fmp->dir_buf);
 }
 
 /*
  * Write directory entry from buffer.
  */
 static int
-fat_write_dirent(struct fatfsmount *fmp, u_long sec)
+fat_write_dirent(struct fatfsmount *fmp, __u32 sec)
 {
-	struct buf *bp;
-
-	bp = getblk(fmp->dev, sec);
-	memcpy(bp->b_data, fmp->dir_buf, SEC_SIZE);
-	return bwrite(bp);
+	/* PERF: prex used bwrite function which reads data from cache */
+	return uk_blkdev_sync_io(fmp->dev, 0, UK_BLKREQ_WRITE, sec, 1, fmp->dir_buf);
 }
 
 /*
@@ -77,7 +65,7 @@ fat_write_dirent(struct fatfsmount *fmp, u_long sec)
  * @node: pointer to fat node
  */
 static int
-fat_lookup_dirent(struct fatfsmount *fmp, u_long sec, char *name,
+fat_lookup_dirent(struct fatfsmount *fmp, __u32 sec, char *name,
 		  struct fatfs_node *np)
 {
 	struct fat_dirent *de;
@@ -118,23 +106,27 @@ fat_lookup_dirent(struct fatfsmount *fmp, u_long sec, char *name,
  * @np: pointer to fat node
  */
 int
-fatfs_lookup_node(vnode_t dvp, char *name, struct fatfs_node *np)
+fatfs_lookup_node(struct vnode *dvp, char *name, struct fatfs_node *np)
 {
 	struct fatfsmount *fmp;
 	char fat_name[12];
-	u_long cl, sec;
-	int i, error;
+	__u32 cl, sec, i;
+	int error;
+	struct fatfs_node *dnp;
 
 	if (name == NULL)
 		return ENOENT;
 
-	DPRINTF(("fat_lookup_denode: cl=%d name=%s\n", dvp->v_blkno, name));
+	dnp = dvp->v_data;
+
+	DPRINTF(("fat_lookup_denode: cl=%d name=%s\n", dnp->dirent.cluster, name));
 
 	fat_convert_name(name, fat_name);
 	*(fat_name + 11) = '\0';
 
 	fmp = (struct fatfsmount *)dvp->v_mount->m_data;
-	cl = dvp->v_blkno;
+
+	cl = dnp->dirent.cluster;
 	if (cl == CL_ROOT) {
 		/* Search entry in root directory */
 		for (sec = fmp->root_start; sec < fmp->data_start; sec++) {
@@ -172,7 +164,7 @@ fatfs_lookup_node(vnode_t dvp, char *name, struct fatfs_node *np)
  * @np: pointer to fat node
  */
 static int
-fat_get_dirent(struct fatfsmount *fmp, u_long sec, int target, int *index,
+fat_get_dirent(struct fatfsmount *fmp, __u32 sec, int target, int *index,
 	       struct fatfs_node *np)
 {
 	struct fat_dirent *de;
@@ -211,14 +203,17 @@ fat_get_dirent(struct fatfsmount *fmp, u_long sec, int target, int *index,
  * @np: pointer to fat node
  */
 int
-fatfs_get_node(vnode_t dvp, int index, struct fatfs_node *np)
+fatfs_get_node(struct vnode *dvp, int index, struct fatfs_node *np)
 {
 	struct fatfsmount *fmp;
-	u_long cl, sec;
-	int i, cur_index, error;
+	__u32 cl, sec, i;
+	int cur_index, error;
+	struct fatfs_node *dnp;
 
 	fmp = (struct fatfsmount *)dvp->v_mount->m_data;
-	cl = dvp->v_blkno;
+	dnp = dvp->v_data;
+
+	cl = dnp->dirent.cluster;
 	cur_index = 0;
 
 	DPRINTF(("fatfs_get_node: index=%d\n", index));
@@ -257,10 +252,11 @@ fatfs_get_node(vnode_t dvp, int index, struct fatfs_node *np)
  * @np: pointer to fat node
  */
 static int
-fat_add_dirent(struct fatfsmount *fmp, u_long sec, struct fatfs_node *np)
+fat_add_dirent(struct fatfsmount *fmp, __u32 sec, struct fatfs_node *np)
 {
 	struct fat_dirent *de;
-	int error, i;
+	int error;
+	__u32 i;
 
 	error = fat_read_dirent(fmp, sec);
 	if (error)
@@ -289,15 +285,16 @@ fat_add_dirent(struct fatfsmount *fmp, u_long sec, struct fatfs_node *np)
  * @np: pointer to fat node
  */
 int
-fatfs_add_node(vnode_t dvp, struct fatfs_node *np)
+fatfs_add_node(struct vnode *dvp, struct fatfs_node *np)
 {
 	struct fatfsmount *fmp;
-	u_long cl, sec;
-	int i, error;
-	u_long next;
+	__u32 cl, sec, i, next;
+	int error;
+	struct fatfs_node *dnp;
 
 	fmp = (struct fatfsmount *)dvp->v_mount->m_data;
-	cl = dvp->v_blkno;
+	dnp = dvp->v_data;
+	cl = dnp->dirent.cluster;
 
 	DPRINTF(("fatfs_add_node: cl=%d\n", cl));
 

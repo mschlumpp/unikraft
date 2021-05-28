@@ -27,28 +27,23 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/prex.h>
+#include <vfscore/vnode.h>
+#include <vfscore/mount.h>
+
+#include <uk/blkdev.h>
 
 #include <sys/stat.h>
-#include <sys/vnode.h>
-#include <sys/file.h>
-#include <sys/mount.h>
-#include <sys/buf.h>
-
-#include <ctype.h>
-#include <unistd.h>
 #include <errno.h>
 #include <string.h>
 #include <stdlib.h>
-#include <fcntl.h>
 
 #include "fatfs.h"
 
-static int fatfs_mount	(mount_t mp, char *dev, int flags, void *data);
-static int fatfs_unmount(mount_t mp);
-#define fatfs_sync	((vfsop_sync_t)vfs_nullop)
-static int fatfs_vget	(mount_t mp, vnode_t vp);
-#define fatfs_statfs	((vfsop_statfs_t)vfs_nullop)
+static int fatfs_mount	(struct mount *mp, const char *dev, int flags, const void *data);
+static int fatfs_unmount(struct mount *mp, int flags);
+#define fatfs_sync	((vfsop_sync_t)vfscore_nullop)
+static int fatfs_vget	(struct mount *mp, struct vnode* vp);
+#define fatfs_statfs	((vfsop_statfs_t)vfscore_nullop)
 
 /*
  * File system operations
@@ -62,6 +57,14 @@ struct vfsops fatfs_vfsops = {
 	&fatfs_vnops,		/* vnops */
 };
 
+static struct vfscore_fs_type fs_fatfs = {
+    .vs_name = "fatfs",
+    .vs_init = NULL,
+    .vs_op = &fatfs_vfsops,
+};
+
+UK_FS_REGISTER(fs_fatfs);
+
 /*
  * Read BIOS parameter block.
  * Return 0 on sucess.
@@ -70,7 +73,6 @@ static int
 fat_read_bpb(struct fatfsmount *fmp)
 {
 	struct fat_bpb *bpb;
-	size_t size;
 	int error;
 
 	bpb = malloc(SEC_SIZE);
@@ -78,8 +80,7 @@ fat_read_bpb(struct fatfsmount *fmp)
 		return ENOMEM;
 
 	/* Read boot sector (block:0) */
-	size = SEC_SIZE;
-	error = device_read(fmp->dev, bpb, &size, 0);
+	error = uk_blkdev_sync_io(fmp->dev, 0, UK_BLKREQ_READ, 0, 1, bpb);
 	if (error) {
 		free(bpb);
 		return error;
@@ -133,10 +134,12 @@ fat_read_bpb(struct fatfsmount *fmp)
  * Mount file system.
  */
 static int
-fatfs_mount(mount_t mp, char *dev, int flags, void *data)
+fatfs_mount(struct mount *mp, const char *dev, int flags __unused,
+	    const void *data __unused)
 {
 	struct fatfsmount *fmp;
-	vnode_t vp;
+	struct fatfs_node *vnp;
+	struct vnode *vp;
 	int error = 0;
 
 	DPRINTF(("fatfs_mount device=%s\n", dev));
@@ -145,7 +148,7 @@ fatfs_mount(mount_t mp, char *dev, int flags, void *data)
 	if (fmp == NULL)
 		return ENOMEM;
 
-	fmp->dev = mp->m_dev;
+	fmp->dev = blkdev;
 	if (fat_read_bpb(fmp) != 0)
 		goto err1;
 
@@ -162,10 +165,12 @@ fatfs_mount(mount_t mp, char *dev, int flags, void *data)
 	if (fmp->dir_buf == NULL)
 		goto err3;
 
-	mutex_init(&fmp->lock);
+	uk_mutex_init(&fmp->lock);
 	mp->m_data = fmp;
-	vp = mp->m_root;
-	vp->v_blkno = CL_ROOT;
+	vp = mp->m_root->d_vnode;
+	vnp = malloc(sizeof(struct fatfs_node));
+	vnp->dirent.cluster = CL_ROOT;
+	vp->v_data = vnp;
 	return 0;
  err3:
 	free(fmp->fat_buf);
@@ -180,7 +185,7 @@ fatfs_mount(mount_t mp, char *dev, int flags, void *data)
  * Unmount the file system.
  */
 static int
-fatfs_unmount(mount_t mp)
+fatfs_unmount(struct mount *mp, int flags __unused)
 {
 	struct fatfsmount *fmp;
 
@@ -188,7 +193,6 @@ fatfs_unmount(mount_t mp)
 	free(fmp->dir_buf);
 	free(fmp->fat_buf);
 	free(fmp->io_buf);
-	mutex_destroy(&fmp->lock);
 	free(fmp);
 	return 0;
 }
@@ -197,7 +201,7 @@ fatfs_unmount(mount_t mp)
  * Prepare the FAT specific node and fill the vnode.
  */
 static int
-fatfs_vget(mount_t mp, vnode_t vp)
+fatfs_vget(struct mount *mp __unused, struct vnode *vp)
 {
 	struct fatfs_node *np;
 

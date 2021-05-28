@@ -27,13 +27,9 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/prex.h>
-#include <sys/buf.h>
+#include <uk/blkdev.h>
 
-#include <ctype.h>
 #include <errno.h>
-#include <string.h>
-#include <stdlib.h>
 
 #include "fatfs.h"
 
@@ -41,12 +37,11 @@
  * Read the FAT entry for specified cluster.
  */
 static int
-read_fat_entry(struct fatfsmount *fmp, u_long cl)
+read_fat_entry(struct fatfsmount *fmp, __u32 cl)
 {
-	u_long sec;
+	__u32 sec;
 	char *buf = fmp->fat_buf;
 	int error, border = 0;
-	struct buf *bp;
 
 	/* Get the sector number in FAT entry. */
 	if (FAT16(fmp))
@@ -64,19 +59,20 @@ read_fat_entry(struct fatfsmount *fmp, u_long cl)
 	sec += fmp->fat_start;
 
 	/* Read first sector. */
-	if ((error = bread(fmp->dev, sec, &bp)) != 0)
+
+	/* PERF: prex used bread function which reads data from cache */
+	error = uk_blkdev_sync_io(fmp->dev, 0, UK_BLKREQ_READ, sec, 1, buf);
+	if (error != 0)
 		return error;
-	memcpy(buf, bp->b_data, SEC_SIZE);
-	brelse(bp);
 
 	if (!FAT12(fmp) || border == 0)
 		return 0;
 
+	/* PERF: prex used bread function which reads data from cache */
 	/* Read second sector for the border entry of FAT12. */
-	if ((error = bread(fmp->dev, sec + 1, &bp)) != 0)
+	error = uk_blkdev_sync_io(fmp->dev, 0, UK_BLKREQ_READ, sec + 1, 1, buf + SEC_SIZE);
+	if (error != 0)
 		return error;
-	memcpy(buf + SEC_SIZE, bp->b_data, SEC_SIZE);
-	brelse(bp);
 	return 0;
 }
 
@@ -84,12 +80,11 @@ read_fat_entry(struct fatfsmount *fmp, u_long cl)
  * Write fat entry from buffer.
  */
 static int
-write_fat_entry(struct fatfsmount *fmp, u_long cl)
+write_fat_entry(struct fatfsmount *fmp, __u32 cl)
 {
-	u_long sec;
+	__u32 sec;
 	char *buf = fmp->fat_buf;
 	int error, border = 0;
-	struct buf *bp;
 
 	/* Get the sector number in FAT entry. */
 	if (FAT16(fmp))
@@ -102,19 +97,18 @@ write_fat_entry(struct fatfsmount *fmp, u_long cl)
 	}
 	sec += fmp->fat_start;
 
+	/* PERF: prex used bwrite function which reads data from cache */
 	/* Write first sector. */
-	bp = getblk(fmp->dev, sec);
-	memcpy(bp->b_data, buf, SEC_SIZE);
-	if ((error = bwrite(bp)) != 0)
+	error = uk_blkdev_sync_io(fmp->dev, 0, UK_BLKREQ_WRITE, sec, 1, buf);
+	if (error != 0)
 		return error;
 
 	if (!FAT12(fmp) || border == 0)
 		return 0;
 
+	/* PERF: prex used bwrite function which reads data from cache */
 	/* Write second sector for the border entry of FAT12. */
-	bp = getblk(fmp->dev, sec + 1);
-	memcpy(bp->b_data, buf + SEC_SIZE, SEC_SIZE);
-	error = bwrite(bp);
+	error = uk_blkdev_sync_io(fmp->dev, 0, UK_BLKREQ_WRITE, sec + 1, 1, buf + SEC_SIZE);
 	return error;
 }
 
@@ -125,10 +119,10 @@ write_fat_entry(struct fatfsmount *fmp, u_long cl)
  * @next: next cluster# to return
  */
 int
-fat_next_cluster(struct fatfsmount *fmp, u_long cl, u_long *next)
+fat_next_cluster(struct fatfsmount *fmp, __u32 cl, __u32 *next)
 {
-	u_int offset;
-	uint16_t val;
+	unsigned int offset;
+	__u16 val;
 	int error;
 
 	/* Read FAT entry */
@@ -143,7 +137,7 @@ fat_next_cluster(struct fatfsmount *fmp, u_long cl, u_long *next)
 		offset = (cl * 3 / 2) % SEC_SIZE;
 
 	/* Pick up cluster# */
-	val = *((uint16_t *)(fmp->fat_buf + offset));
+	val = *((__u16 *)(fmp->fat_buf + offset));
 
 	/* Adjust data for FAT12 entry */
 	if (FAT12(fmp)) {
@@ -152,7 +146,7 @@ fat_next_cluster(struct fatfsmount *fmp, u_long cl, u_long *next)
 		else
 			val &= 0xfff;
 	}
-	*next = (u_long)val;
+	*next = val;
 	DPRINTF(("fat_next_cluster: %d => %d\n", cl, *next));
 	return 0;
 }
@@ -164,12 +158,12 @@ fat_next_cluster(struct fatfsmount *fmp, u_long cl, u_long *next)
  * @next: cluster# to set (can be eof)
  */
 int
-fat_set_cluster(struct fatfsmount *fmp, u_long cl, u_long next)
+fat_set_cluster(struct fatfsmount *fmp, __u32 cl, __u32 next)
 {
-	u_int offset;
+	unsigned int offset;
 	char *buf = fmp->fat_buf;
 	int error;
-	uint16_t val, tmp;
+	__u16 val, tmp;
 
 	/* Read FAT entry */
 	error = read_fat_entry(fmp, cl);
@@ -183,9 +177,9 @@ fat_set_cluster(struct fatfsmount *fmp, u_long cl, u_long next)
 		offset = (cl * 3 / 2) % SEC_SIZE;
 
 	/* Modify FAT entry for target cluster. */
-	val = (uint16_t)(next & fmp->fat_mask);
+	val = next & fmp->fat_mask;
 	if (FAT12(fmp)) {
-		tmp = *((uint16_t *)(buf + offset));
+		tmp = *((__u16 *)(buf + offset));
 		if (cl & 1) {
 			val <<= 4;
 			val |= (tmp & 0xf);
@@ -194,7 +188,7 @@ fat_set_cluster(struct fatfsmount *fmp, u_long cl, u_long next)
 			val |= tmp;
 		}
 	}
-	*((uint16_t *)(buf + offset)) = val;
+	*((__u16 *)(buf + offset)) = val;
 
 	/* Write FAT entry */
 	error = write_fat_entry(fmp, cl);
@@ -209,9 +203,9 @@ fat_set_cluster(struct fatfsmount *fmp, u_long cl, u_long next)
  * @free: allocated cluster# to return
  */
 int
-fat_alloc_cluster(struct fatfsmount *fmp, u_long scan_start, u_long *free)
+fat_alloc_cluster(struct fatfsmount *fmp, __u32 scan_start, __u32 *free)
 {
-	u_long cl, next;
+	__u32 cl, next;
 	int error;
 
 	if (scan_start == 0)
@@ -241,10 +235,10 @@ fat_alloc_cluster(struct fatfsmount *fmp, u_long scan_start, u_long *free)
  * @start: first cluster# of FAT chain
  */
 int
-fat_free_clusters(struct fatfsmount *fmp, u_long start)
+fat_free_clusters(struct fatfsmount *fmp, __u32 start)
 {
 	int error;
-	u_long cl, next;
+	__u32 cl, next;
 
 	cl = start;
 	if (cl < CL_FIRST)
@@ -275,11 +269,10 @@ fat_free_clusters(struct fatfsmount *fmp, u_long start)
  * @cl: cluster# to return
  */
 int
-fat_seek_cluster(struct fatfsmount *fmp, u_long start, u_long offset,
-		 u_long *cl)
+fat_seek_cluster(struct fatfsmount *fmp, __u32 start, __u32 offset, __u32 *cl)
 {
-	int error, i;
-	u_long c, target;
+	int error;
+	__u32 i, c, target;
 
 	if (start > fmp->last_cluster)
 		return EIO;
@@ -305,10 +298,11 @@ fat_seek_cluster(struct fatfsmount *fmp, u_long start, u_long offset,
  * @size: new size of file in bytes.
  */
 int
-fat_expand_file(struct fatfsmount *fmp, u_long cl, int size)
+fat_expand_file(struct fatfsmount *fmp, __u32 cl, __u32 size)
 {
-	int i, cl_len, alloc, error;
-	u_long next;
+	__u32 i, cl_len;
+	int alloc, error;
+	__u32 next;
 
 	alloc = 0;
 	cl_len = size / fmp->cluster_size + 1;
@@ -346,10 +340,10 @@ fat_expand_file(struct fatfsmount *fmp, u_long cl, int size)
  * Note: The root directory can not be expanded.
  */
 int
-fat_expand_dir(struct fatfsmount *fmp, u_long cl, u_long *new_cl)
+fat_expand_dir(struct fatfsmount *fmp, __u32 cl, __u32 *new_cl)
 {
 	int error;
-	u_long next;
+	__u32 next;
 
 	/* Find last cluster number of FAT chain. */
 	while (!IS_EOFCL(fmp, cl)) {

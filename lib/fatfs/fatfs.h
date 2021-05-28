@@ -30,35 +30,29 @@
 #ifndef _FATFS_H
 #define _FATFS_H
 
-#include <sys/prex.h>
-#include <sys/cdefs.h>
+#include <vfscore/vnode.h>
 #include <sys/types.h>
-#include <sys/vnode.h>
 #include <sys/file.h>
 #include <sys/mount.h>
-#include <sys/syslog.h>
-#include <sys/buf.h>
+#include <stdint.h>
 
 /* #define DEBUG_FATFS 1 */
 
 #ifdef DEBUG_FATFS
-#define DPRINTF(a)	dprintf a
-#define ASSERT(e)	dassert(e)
+#define DPRINTF(a)	uk_pr_debug a
+#define ASSERT(e)	assert(e)
 #else
 #define DPRINTF(a)	do {} while (0)
 #define ASSERT(e)
 #endif
 
 
-#if CONFIG_FS_THREADS > 1
-#define malloc(s)		malloc_r(s)
-#define free(p)			free_r(p)
-#else
-#define mutex_init(m)		do {} while (0)
-#define mutex_destroy(m)	do {} while (0)
-#define mutex_lock(m)		do {} while (0)
-#define mutex_unlock(m)		do {} while (0)
-#define mutex_trylock(m)	do {} while (0)
+#ifndef CONFIG_HAVE_SCHED
+#define uk_mutex_init(m)		do {} while (0)
+#define uk_mutex_destroy(m)		do {} while (0)
+#define uk_mutex_unlock(m)		do {} while (0)
+#define uk_mutex_unlock(m)		do {} while (0)
+#define uk_mutex_trylock(m)		do {} while (0)
 #endif
 
 
@@ -87,40 +81,40 @@
  * BIOS parameter block
  */
 struct fat_bpb {
-	uint16_t	jmp_instruction;
-	uint8_t		nop_instruction;
-	uint8_t		oem_id[8];
-	uint16_t	bytes_per_sector;
-	uint8_t		sectors_per_cluster;
-	uint16_t	reserved_sectors;
-	uint8_t		num_of_fats;
-	uint16_t	root_entries;
-	uint16_t	total_sectors;
-	uint8_t		media_descriptor;
-	uint16_t	sectors_per_fat;
-	uint16_t	sectors_per_track;
-	uint16_t	heads;
-	uint32_t	hidden_sectors;
-	uint32_t	big_total_sectors;
-	uint8_t		physical_drive;
-	uint8_t		reserved;
-	uint8_t		ext_boot_signature;
-	uint32_t	serial_no;
-	uint8_t		volume_id[11];
-	uint8_t		file_sys_id[8];
+	__u16	jmp_instruction;
+	__u8	nop_instruction;
+	__u8	oem_id[8];
+	__u16	bytes_per_sector;
+	__u8	sectors_per_cluster;
+	__u16	reserved_sectors;
+	__u8	num_of_fats;
+	__u16	root_entries;
+	__u16	total_sectors;
+	__u8	media_descriptor;
+	__u16	sectors_per_fat;
+	__u16	sectors_per_track;
+	__u16	heads;
+	__u32	hidden_sectors;
+	__u32	big_total_sectors;
+	__u8	physical_drive;
+	__u8	reserved;
+	__u8	ext_boot_signature;
+	__u32	serial_no;
+	__u8	volume_id[11];
+	__u8	file_sys_id[8];
 } __packed;
 
 /*
  * FAT directory entry
  */
 struct fat_dirent {
-	uint8_t		name[11];
-	uint8_t		attr;
-	uint8_t		reserve[10];
-	uint16_t	time;
-	uint16_t	date;
-	uint16_t	cluster;
-	uint32_t	size;
+	__u8	name[11];
+	__u8	attr;
+	__u8	reserve[10];
+	__u16	time;
+	__u16	date;
+	__u16	cluster;
+	__u32	size;
 } __packed;
 
 #if defined(__SUNPRO_C)
@@ -130,7 +124,7 @@ struct fat_dirent {
 #define SLOT_EMPTY	0x00
 #define SLOT_DELETED	0xe5
 
-#define DIR_PER_SEC     (SEC_SIZE / sizeof(struct fat_dirent))
+#define DIR_PER_SEC     (SEC_SIZE / (int)sizeof(struct fat_dirent))
 
 /*
  * FAT attribute for attr
@@ -154,23 +148,23 @@ struct fat_dirent {
  * Mount data
  */
 struct fatfsmount {
-	int	fat_type;	/* 12 or 16 */
-	u_long	root_start;	/* start sector for root directory */
-	u_long	fat_start;	/* start sector for fat entries */
-	u_long	data_start;	/* start sector for data */
-	u_long	fat_eof;	/* id of end cluster */
-	u_long	sec_per_cl;	/* sectors per cluster */
-	u_long	cluster_size;	/* cluster size */
-	u_long	last_cluster;	/* last cluser */
-	u_long	fat_mask;	/* mask for cluster# */
-	u_long	free_scan;	/* start cluster# to free search */
-	vnode_t	root_vnode;	/* vnode for root */
-	char	*io_buf;	/* local data buffer */
-	char	*fat_buf;	/* buffer for fat entry */
-	char	*dir_buf;	/* buffer for directory entry */
-	dev_t	dev;		/* mounted device */
-#if CONFIG_FS_THREADS > 1
-	mutex_t lock;		/* file system lock */
+	int			fat_type;	/* 12 or 16 */
+	__u32			root_start;	/* start sector for root directory */
+	__u32			fat_start;	/* start sector for fat entries */
+	__u32			data_start;	/* start sector for data */
+	__u32			fat_eof;	/* id of end cluster */
+	__u32			sec_per_cl;	/* sectors per cluster */
+	__u32			cluster_size;	/* cluster size */
+	__u32			last_cluster;	/* last cluser */
+	__u32			fat_mask;	/* mask for cluster# */
+	__u32			free_scan;	/* start cluster# to free search */
+	struct vnode		*root_vnode;	/* vnode for root */
+	char			*io_buf;	/* local data buffer */
+	char			*fat_buf;	/* buffer for fat entry */
+	char			*dir_buf;	/* buffer for directory entry */
+	struct uk_blkdev	*dev;		/* mounted device */
+#ifdef CONFIG_LIBUKSCHED
+	struct uk_mutex		lock;		/* file system lock */
 #endif
 };
 
@@ -184,9 +178,9 @@ struct fatfsmount {
  * File/directory node
  */
 struct fatfs_node {
-	struct fat_dirent dirent; /* copy of directory entry */
-	u_long	sector;		/* sector# for directory entry */
-	u_long	offset;		/* offset of directory entry in sector */
+	struct fat_dirent dirent; 	/* copy of directory entry */
+	__u32	sector;			/* sector# for directory entry */
+	__u32	offset;			/* offset of directory entry in sector */
 };
 
 extern struct vnops fatfs_vnops;
@@ -195,27 +189,25 @@ extern struct vnops fatfs_vnops;
 #define cl_to_sec(fat, cl) \
             (fat->data_start + (cl - 2) * fat->sec_per_cl)
 
-__BEGIN_DECLS
-int	 fat_next_cluster(struct fatfsmount *fmp, u_long cl, u_long *next);
-int	 fat_set_cluster(struct fatfsmount *fmp, u_long cl, u_long next);
-int	 fat_alloc_cluster(struct fatfsmount *fmp, u_long scan_start, u_long *free);
-int	 fat_free_clusters(struct fatfsmount *fmp, u_long start);
-int	 fat_seek_cluster(struct fatfsmount *fmp, u_long start, u_long offset,
-			    u_long *cl);
-int	 fat_expand_file(struct fatfsmount *fmp, u_long cl, int size);
-int	 fat_expand_dir(struct fatfsmount *fmp, u_long cl, u_long *new_cl);
+int	 fat_next_cluster(struct fatfsmount *fmp, __u32 cl, __u32 *next);
+int	 fat_set_cluster(struct fatfsmount *fmp, __u32 cl, __u32 next);
+int	 fat_alloc_cluster(struct fatfsmount *fmp, __u32 scan_start, __u32 *free);
+int	 fat_free_clusters(struct fatfsmount *fmp, __u32 start);
+int	 fat_seek_cluster(struct fatfsmount *fmp, __u32 start, __u32 offset,
+			    __u32 *cl);
+int	 fat_expand_file(struct fatfsmount *fmp, __u32 cl, __u32 size);
+int	 fat_expand_dir(struct fatfsmount *fmp, __u32 cl, __u32 *new_cl);
 
 void	 fat_convert_name(char *org, char *name);
 void	 fat_restore_name(char *org, char *name);
 int	 fat_valid_name(char *name);
 int	 fat_compare_name(char *n1, char *n2);
-void	 fat_mode_to_attr(mode_t mode, u_char *attr);
-void	 fat_attr_to_mode(u_char attr, mode_t *mode);
+void	 fat_mode_to_attr(mode_t mode, unsigned char *attr);
+void	 fat_attr_to_mode(unsigned char attr, mode_t *mode);
 
-int	 fatfs_lookup_node(vnode_t dvp, char *name, struct fatfs_node *node);
-int	 fatfs_get_node(vnode_t dvp, int index, struct fatfs_node *node);
+int	 fatfs_lookup_node(struct vnode *dvp, char *name, struct fatfs_node *node);
+int	 fatfs_get_node(struct vnode *dvp, int index, struct fatfs_node *node);
 int	 fatfs_put_node(struct fatfsmount *fmp, struct fatfs_node *node);
-int	 fatfs_add_node(vnode_t dvp, struct fatfs_node *node);
-__END_DECLS
+int	 fatfs_add_node(struct vnode *dvp, struct fatfs_node *node);
 
 #endif /* !_FATFS_H */
