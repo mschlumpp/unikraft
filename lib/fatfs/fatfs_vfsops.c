@@ -130,6 +130,97 @@ fat_read_bpb(struct fatfsmount *fmp)
 	return 0;
 }
 
+static void fatfs_blkdev_callback(struct uk_blkdev *dev,
+				 uint16_t queue_id, void *argp __unused) {
+	uk_blkdev_queue_finish_reqs(dev, queue_id);
+}
+
+static int fatfs_open_blkdev(const char *dev, struct uk_blkdev **blkdev_out) {
+	__u32 dev_idx;
+	struct uk_blkdev *blkdev;
+	int error;
+	struct uk_blkdev_conf blkdev_conf = {0};
+	struct uk_blkdev_queue_info blkdev_queue_info = {0};
+	struct uk_blkdev_queue_conf blkdev_queue_conf = {0};
+
+	if (dev == NULL || strncmp(dev, "bd", 2) != 0) {
+		return EINVAL;
+	}
+
+	dev_idx = strtoul(dev + 2, NULL, 10);
+	blkdev = uk_blkdev_get(dev_idx);
+	if (blkdev == NULL) {
+		return ENOENT;
+	}
+
+	blkdev_conf.nb_queues = 1;
+	error = uk_blkdev_configure(blkdev, &blkdev_conf);
+	if (error) {
+		return error;
+	}
+
+	error = uk_blkdev_queue_get_info(blkdev, 0, &blkdev_queue_info);
+	if (error) {
+		goto queue_conf_err;
+	}
+
+	blkdev_queue_conf.a = uk_alloc_get_default();
+	blkdev_queue_conf.callback = fatfs_blkdev_callback;
+	error = uk_blkdev_queue_configure(blkdev, 0, blkdev_queue_info.nb_min,
+					  &blkdev_queue_conf);
+	if (error) {
+		goto queue_conf_err;
+	}
+
+	error = uk_blkdev_start(blkdev);
+	if (error) {
+		goto blkdev_start_err;
+	}
+
+	if (uk_blkdev_ssize(blkdev) != SEC_SIZE) {
+		error = EINVAL;
+		goto property_err;
+	}
+
+	error = uk_blkdev_queue_intr_enable(blkdev, 0);
+	if (error) {
+		goto property_err;
+	}
+
+	*blkdev_out = blkdev;
+	return 0;
+
+property_err:
+	uk_blkdev_stop(blkdev);
+blkdev_start_err:
+	uk_blkdev_queue_unconfigure(blkdev, 0);
+queue_conf_err:
+	uk_blkdev_unconfigure(blkdev);
+
+	return error;
+}
+
+static int fatfs_close_blkdev(struct uk_blkdev *blkdev) {
+	int error;
+
+	error = uk_blkdev_stop(blkdev);
+	if (error) {
+		return error;
+	}
+
+	error = uk_blkdev_queue_unconfigure(blkdev, 0);
+	if (error) {
+		return error;
+	}
+
+	error = uk_blkdev_unconfigure(blkdev);
+	if (error) {
+		return error;
+	}
+
+	return 0;
+}
+
 /*
  * Mount file system.
  */
@@ -148,7 +239,11 @@ fatfs_mount(struct mount *mp, const char *dev, int flags __unused,
 	if (fmp == NULL)
 		return ENOMEM;
 
-	fmp->dev = blkdev;
+	error = fatfs_open_blkdev(dev, &fmp->dev);
+	if (error) {
+		return error;
+	}
+
 	if (fat_read_bpb(fmp) != 0)
 		goto err1;
 
@@ -177,6 +272,7 @@ fatfs_mount(struct mount *mp, const char *dev, int flags __unused,
  err2:
 	free(fmp->io_buf);
  err1:
+	fatfs_close_blkdev(fmp->dev);
 	free(fmp);
 	return error;
 }
@@ -189,7 +285,9 @@ fatfs_unmount(struct mount *mp, int flags __unused)
 {
 	struct fatfsmount *fmp;
 
+	// FIXME: free dentries?
 	fmp = mp->m_data;
+	fatfs_close_blkdev(fmp->dev);
 	free(fmp->dir_buf);
 	free(fmp->fat_buf);
 	free(fmp->io_buf);
