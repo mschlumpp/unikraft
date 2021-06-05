@@ -219,9 +219,28 @@ fatfs_get_node(struct vnode *dvp, int index, struct fatfs_node *np)
 	DPRINTF(("fatfs_get_node: index=%d\n", index));
 
 	if (cl == CL_ROOT) {
+		if (index == 0) {
+			memcpy(np->dirent.name, ".          ", 11);
+			np->dirent.attr = FA_SUBDIR;
+			np->dirent.cluster = cl;
+			np->dirent.time = 0;
+			np->dirent.date = 0;
+			/* These fatfs nodes do not exist on disk! */
+			np->sector = __U32_MAX;
+			return 0;
+		}
+		if (index == 1) {
+			memcpy(np->dirent.name, "..         ", 11);
+			np->dirent.attr = FA_SUBDIR;
+			np->dirent.cluster = cl;
+			np->dirent.time = 0;
+			np->dirent.date = 0;
+			np->sector = __U32_MAX;
+			return 0;
+		}
 		/* Get entry from the root directory */
 		for (sec = fmp->root_start; sec < fmp->data_start; sec++) {
-			error = fat_get_dirent(fmp, sec, index, &cur_index, np);
+			error = fat_get_dirent(fmp, sec, index - 2, &cur_index, np);
 			if (error != EAGAIN)
 				return error;
 		}
