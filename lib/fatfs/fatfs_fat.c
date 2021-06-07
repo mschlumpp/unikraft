@@ -305,9 +305,9 @@ fat_expand_file(struct fatfsmount *fmp, __u32 cl, __u32 size)
 	__u32 next;
 
 	alloc = 0;
-	cl_len = size / fmp->cluster_size + 1;
+	cl_len = (size + fmp->cluster_size - 1) / fmp->cluster_size;
 
-	for (i = 0; i < cl_len; i++) {
+	for (i = 1; i < cl_len; i++) {
 		error = fat_next_cluster(fmp, cl, &next);
 		if (error)
 			return error;
