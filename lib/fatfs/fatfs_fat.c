@@ -294,38 +294,47 @@ fat_seek_cluster(struct fatfsmount *fmp, __u32 start, __u32 offset, __u32 *cl)
  * Expand file size.
  *
  * @fmp: fat mount data
- * @cl: cluster# of target file.
+ * @cl: cluster# of target file. Set to allocated cluster number if CL_FREE.
  * @size: new size of file in bytes.
  */
 int
-fat_expand_file(struct fatfsmount *fmp, __u32 cl, __u32 size)
+fat_expand_file(struct fatfsmount *fmp, __u32 *cl, __u32 size)
 {
 	__u32 i, cl_len;
 	int alloc, error;
-	__u32 next;
+	__u32 current, next;
 
 	alloc = 0;
 	cl_len = (size + fmp->cluster_size - 1) / fmp->cluster_size;
 
+	/* allocate cluster if the file was previously empty */
+	if (*cl == CL_FREE) {
+		error = fat_alloc_cluster(fmp, 0, cl);
+		if (error)
+			return error;
+		alloc = 1;
+	}
+	current = *cl;
+
 	for (i = 1; i < cl_len; i++) {
-		error = fat_next_cluster(fmp, cl, &next);
+		error = fat_next_cluster(fmp, current, &next);
 		if (error)
 			return error;
 		if (alloc || next >= fmp->fat_eof) {
-			error = fat_alloc_cluster(fmp, cl, &next);
+			error = fat_alloc_cluster(fmp, current, &next);
 			if (error)
 				return error;
 			alloc = 1;
 		}
 		if (alloc) {
-			error = fat_set_cluster(fmp, cl, next);
+			error = fat_set_cluster(fmp, current, next);
 			if (error)
 				return error;
 		}
-		cl = next;
+		current = next;
 	}
 	if (alloc)
-		fat_set_cluster(fmp, cl, fmp->fat_eof);	/* add eof */
+		fat_set_cluster(fmp, current, fmp->fat_eof);	/* add eof */
 	DPRINTF(("fat_expand_file: new size=%d\n", size));
 	return 0;
 }

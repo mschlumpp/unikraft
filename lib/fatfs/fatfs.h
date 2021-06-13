@@ -195,7 +195,7 @@ int	 fat_alloc_cluster(struct fatfsmount *fmp, __u32 scan_start, __u32 *free);
 int	 fat_free_clusters(struct fatfsmount *fmp, __u32 start);
 int	 fat_seek_cluster(struct fatfsmount *fmp, __u32 start, __u32 offset,
 			    __u32 *cl);
-int	 fat_expand_file(struct fatfsmount *fmp, __u32 cl, __u32 size);
+int	 fat_expand_file(struct fatfsmount *fmp, __u32 *cl, __u32 size);
 int	 fat_expand_dir(struct fatfsmount *fmp, __u32 cl, __u32 *new_cl);
 
 void	 fat_convert_name(char *org, char *name);

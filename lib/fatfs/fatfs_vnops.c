@@ -326,11 +326,13 @@ fatfs_write(struct vnode *vp, struct uio *uio, int ioflag __unused)
 
 		/* Expand the file size before writing to it */
 		end_pos = file_pos + iov->iov_len;
-		error = fat_expand_file(fmp, np->dirent.cluster, end_pos);
+		cl = np->dirent.cluster;
+		error = fat_expand_file(fmp, &cl, end_pos);
 		if (error) {
 			error = EIO;
 			goto out;
 		}
+		np->dirent.cluster = cl;
 
 		/* Update directory entry */
 		de = &np->dirent;
@@ -745,6 +747,7 @@ fatfs_truncate(struct vnode *vp, off_t length)
 	struct fatfs_node *np;
 	struct fat_dirent *de;
 	int error;
+	__u32 cl;
 
 	fmp = vp->v_mount->m_data;
 	uk_mutex_lock(&fmp->lock);
@@ -758,11 +761,13 @@ fatfs_truncate(struct vnode *vp, off_t length)
 		if (error)
 			goto out;
 	} else if (length > vp->v_size) {
-		error = fat_expand_file(fmp, de->cluster, length);
+		cl = de->cluster;
+		error = fat_expand_file(fmp, &cl, length);
 		if (error) {
 			error = EIO;
 			goto out;
 		}
+		de->cluster = cl;
 	}
 
 	/* Update directory entry */
