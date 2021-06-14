@@ -761,6 +761,7 @@ fatfs_truncate(struct vnode *vp, off_t length)
 		error = fat_free_clusters(fmp, de->cluster);
 		if (error)
 			goto out;
+		de->cluster = CL_FREE;
 	} else if (length > vp->v_size) {
 		cl = de->cluster;
 		error = fat_expand_file(fmp, &cl, length);
