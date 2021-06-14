@@ -271,8 +271,6 @@ fatfs_read(struct vnode *vp, struct vfscore_file *fp, struct uio *uio,
 	iov->iov_base = buf;
 	iov->iov_len -= nr_read;
 
-	fp->f_offset = file_pos;
-
 	error = 0;
  out:
 	uk_mutex_unlock(&fmp->lock);
