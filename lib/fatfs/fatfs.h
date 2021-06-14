@@ -36,16 +36,7 @@
 #include <sys/mount.h>
 #include <stdint.h>
 
-/* #define DEBUG_FATFS 1 */
-
-#ifdef DEBUG_FATFS
 #define DPRINTF(a)	uk_pr_debug a
-#define ASSERT(e)	assert(e)
-#else
-#define DPRINTF(a)	do {} while (0)
-#define ASSERT(e)
-#endif
-
 
 #ifndef CONFIG_HAVE_SCHED
 #define uk_mutex_init(m)		do {} while (0)

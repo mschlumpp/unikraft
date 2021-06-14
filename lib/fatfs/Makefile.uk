@@ -1,6 +1,7 @@
 $(eval $(call addlib_s,libfatfs,$(CONFIG_LIBFATFS)))
 
 LIBFATFS_CFLAGS-$(call gcc_version_ge,8,0) += -Wno-cast-function-type
+LIBFATFS_CFLAGS-$(CONFIG_LIBFATFS_DEBUG) += -DUK_DEBUG
 
 LIBFATFS_SRCS-y += $(LIBFATFS_BASE)/fatfs_vnops.c
 LIBFATFS_SRCS-y += $(LIBFATFS_BASE)/fatfs_node.c

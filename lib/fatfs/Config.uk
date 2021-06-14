@@ -1,6 +1,12 @@
-config LIBFATFS
+menuconfig LIBFATFS
 	bool "fatfs: FAT filesystem"
 	default n
 	depends on LIBVFSCORE
 	depends on LIBUKBLKDEV
 	select LIBUKBLKDEV_SYNC_IO_BLOCKED_WAITING
+
+if LIBFATFS
+config LIBFATFS_DEBUG
+  bool "Debug messages"
+  default n
+endif
