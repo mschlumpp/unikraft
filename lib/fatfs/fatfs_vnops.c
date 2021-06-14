@@ -718,9 +718,12 @@ fatfs_rmdir(struct vnode *dvp, struct vnode *vp __unused, char *name)
 }
 
 static int
-fatfs_getattr(struct vnode *vp __unused, struct vattr *vap __unused)
+fatfs_getattr(struct vnode *vp, struct vattr *vap)
 {
-	/* XXX */
+	vap->va_type = vp->v_type;
+	vap->va_mode = vp->v_mode;
+	vap->va_nodeid = vp->v_ino;
+	vap->va_size = vp->v_size;
 	return 0;
 }
 
