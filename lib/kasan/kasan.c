@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
 /*
  * Authors: Badoiu Vlad-Andrei <vlad_andrei.badoiu@upb.ro>
+ *          Marco Schlumpp <marco.schlumpp@gmail.com>
  *
  * Copyright (c) 2021, University Politehnica of Bucharest. All rights reserved.
  *
@@ -47,6 +48,8 @@ static int kasan_ready;
 static const char *code_name(uint8_t code)
 {
 	switch (code) {
+	case KASAN_CODE_ADDRESSABLE:
+		return "addressable";
 	case KASAN_CODE_STACK_LEFT:
 	case KASAN_CODE_STACK_MID:
 	case KASAN_CODE_STACK_RIGHT:
@@ -67,6 +70,84 @@ static const char *code_name(uint8_t code)
 		return "partial redzone";
 	default:
 		return "unknown redzone";
+	}
+}
+
+static void print_legend_key(uint8_t *used_codes, const char *custom,
+			     uint8_t code)
+{
+	const char *key = custom;
+
+	if (used_codes && !used_codes[code]) {
+		return;
+	}
+
+	if (!key) {
+		key = code_name(code);
+	}
+	uk_pr_crit("%22s: %02x\n", key, code);
+}
+
+static void print_shadow_environment_legend(uint8_t *used_codes)
+{
+	uk_pr_crit("Shadow byte legend (one shadow byte represents 8 "
+		   "application bytes):\n");
+	print_legend_key(used_codes, NULL, KASAN_CODE_ADDRESSABLE);
+	for (int i = 1; i < 8; i++) {
+		print_legend_key(used_codes, "partially-addressable", i);
+	}
+	print_legend_key(used_codes, NULL, KASAN_CODE_STACK_LEFT);
+	print_legend_key(used_codes, NULL, KASAN_CODE_STACK_MID);
+	print_legend_key(used_codes, NULL, KASAN_CODE_STACK_RIGHT);
+	print_legend_key(used_codes, NULL, KASAN_CODE_GLOBAL_OVERFLOW);
+	print_legend_key(used_codes, NULL, KASAN_CODE_KMEM_FREED);
+	print_legend_key(used_codes, NULL, KASAN_CODE_POOL_OVERFLOW);
+	print_legend_key(used_codes, NULL, KASAN_CODE_POOL_FREED);
+	print_legend_key(used_codes, NULL, KASAN_CODE_KMALLOC_OVERFLOW);
+	print_legend_key(used_codes, NULL, KASAN_CODE_KMALLOC_FREED);
+}
+
+static void print_environment_row(uint8_t *used_codes, int shadow_bytes_per_row,
+				  uintptr_t row_addr, uintptr_t target)
+{
+	const char *prefix, *suffix;
+	uk_pr_crit("%" PRIxPTR ": ", row_addr);
+	for (int col = 0; col < shadow_bytes_per_row; col++) {
+		uintptr_t addr = row_addr + (col << KASAN_SHADOW_SCALE_SHIFT);
+		uint8_t code = *kasan_md_addr_to_shad(addr);
+		used_codes[code] = 1;
+
+		suffix = "";
+		if (addr == target) {
+			prefix = "[";
+			suffix = "]";
+		} else if (addr == target + KASAN_SHADOW_SCALE_SIZE
+			   && col != 0) {
+			prefix = "";
+		} else {
+			prefix = " ";
+		}
+		uk_pr_crit("%s%02x%s", prefix, code, suffix);
+	}
+	uk_pr_crit("\n");
+}
+
+static void print_shadow_environment(uint8_t *used_codes, uintptr_t addr)
+{
+	const int shadow_bytes_per_row = 16;
+	const int real_bytes_per_row = shadow_bytes_per_row
+				       << KASAN_SHADOW_SCALE_SHIFT;
+	const int context_rows = 6;
+
+	uk_pr_crit("Shadow bytes around buggy address:\n");
+
+	uintptr_t aligned_addr = addr & ~((real_bytes_per_row)-1);
+	for (int row = -context_rows; row < context_rows; row++) {
+		uintptr_t row_addr = aligned_addr + row * real_bytes_per_row;
+		if (!kasan_md_addr_supported(row_addr))
+			continue;
+		print_environment_row(used_codes, shadow_bytes_per_row,
+				      row_addr, addr & ~KASAN_SHADOW_MASK);
 	}
 }
 
@@ -176,14 +257,22 @@ shadow_check(uintptr_t addr, size_t size, bool read)
 	}
 
 	if (unlikely(!valid)) {
-		UK_CRASH("===========KernelAddressSanitizer===========\n"
-			"ERROR:\n"
-			"* invalid access to address %p\n"
-			"* %s of size %lu\n"
-			"* redzone code 0x%x (%s)\n"
-			"============================================\n",
-			(void *)addr, (read ? "read" : "write"), size, code,
-			code_name(code));
+		// Use one byte per code for simplicity
+		uint8_t used_codes[256];
+		__builtin_memset(used_codes, 0, sizeof(used_codes));
+
+		uk_pr_crit("===========KernelAddressSanitizer===========\n"
+			   "ERROR:\n"
+			   "* invalid access to address %p\n"
+			   "* %s of size %lu\n"
+			   "* redzone code 0x%x (%s)\n"
+			   "============================================\n",
+			   (void *)addr, (read ? "read" : "write"), size, code,
+			   code_name(code));
+		uk_pr_crit("\n");
+		print_shadow_environment(used_codes, addr);
+		print_shadow_environment_legend(used_codes);
+		UK_CRASH("address sanitizer detected an error\n");
 	}
 }
 

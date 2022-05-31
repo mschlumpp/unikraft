@@ -41,6 +41,8 @@
 extern "C" {
 #endif
 
+#define KASAN_CODE_ADDRESSABLE 0x00
+
 #define KASAN_CODE_STACK_LEFT 0xF1
 #define KASAN_CODE_STACK_MID 0xF2
 #define KASAN_CODE_STACK_RIGHT 0xF3
