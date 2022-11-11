@@ -36,6 +36,7 @@
 #include <uk/sched_impl.h>
 #include <uk/schedcoop.h>
 #include <uk/essentials.h>
+#include <uk/bitops.h>
 
 struct schedcoop {
 	struct uk_sched sched;
@@ -172,10 +173,13 @@ static void schedcoop_thread_woken(struct uk_sched *s, struct uk_thread *t)
 		UK_TAILQ_INSERT_TAIL(&c->run_queue, t, queue);
 }
 
+extern unsigned long sched_have_pending_events;
+
 static __noreturn void idle_thread_fn(void *argp)
 {
 	struct schedcoop *c = (struct schedcoop *) argp;
 	__nsec now, wake_up_time;
+	unsigned long irqf;
 
 	UK_ASSERT(c);
 
@@ -201,7 +205,10 @@ static __noreturn void idle_thread_fn(void *argp)
 		wake_up_time = (volatile __nsec) c->idle_return_time;
 		now = ukplat_monotonic_clock();
 
-		if (wake_up_time > now) {
+		irqf = ukplat_lcpu_save_irqf();
+		if (wake_up_time > now
+		    && !__uk_test_and_clear_bit(0,
+						&sched_have_pending_events)) {
 			if (wake_up_time)
 				ukplat_lcpu_halt_to(wake_up_time);
 			else
@@ -210,6 +217,7 @@ static __noreturn void idle_thread_fn(void *argp)
 			/* handle pending events if any */
 			ukplat_lcpu_irqs_handle_pending();
 		}
+		ukplat_lcpu_restore_irqf(irqf);
 
 		/* try to schedule a thread that might now be available */
 		schedcoop_schedule(&c->sched);
